@@ -2,16 +2,30 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Dr. Mark">
+<meta name="theme-color" content="#120620">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>Dr. Mark</title>
 <style>
-html,body{margin:0;height:100%;background:#120620;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;}
+html,body{margin:0;position:fixed;inset:0;width:100%;height:100%;background:#120620;overflow:hidden;overscroll-behavior:none;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;}
 body{display:flex;align-items:center;justify-content:center;}
-canvas{display:block;}
+canvas{display:block;touch-action:none;}
+.ui{font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;color:#fff;}
+#rotate{display:none;position:fixed;inset:0;z-index:10;background:#120620;flex-direction:column;align-items:center;justify-content:center;gap:16px;font-size:22px;font-weight:bold;text-align:center;}
+#rotate span{font-size:64px;}
+@media (orientation:portrait) and (pointer:coarse) and (max-width:600px){#rotate{display:flex;}}
+#tip{display:none;position:fixed;z-index:9;left:50%;transform:translateX(-50%);bottom:calc(8px + env(safe-area-inset-bottom));background:rgba(40,12,60,0.92);border:1px solid #ff4fa0;border-radius:12px;padding:8px 14px;font-size:14px;white-space:nowrap;}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="rotate" class="ui"><span>&#x21bb;</span>Turn your phone sideways</div>
+<div id="tip" class="ui">Full screen: tap Share &#x2191; then <b>Add to Home Screen</b> &nbsp;&#x2715;</div>
 <script>
 'use strict';
 // ======================= DR. MARK =======================
@@ -27,6 +41,47 @@ function fit() {
   cv.width = Math.round(W * scale * dpr); cv.height = Math.round(H * scale * dpr);
 }
 addEventListener('resize', fit); fit();
+addEventListener('orientationchange', () => setTimeout(fit, 300));
+document.addEventListener('fullscreenchange', () => setTimeout(fit, 100));
+document.addEventListener('webkitfullscreenchange', () => setTimeout(fit, 100));
+
+// ================= PHONE: bigger screen + no accidental browser swipes =================
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
+const onOverlay = e => !!(e.target && e.target.closest && e.target.closest('.ui'));
+// keep the browser from scrolling, zooming, pull-to-refresh or swiping pages while you play
+const stopGesture = e => { if (e.cancelable) e.preventDefault(); };
+['touchstart', 'touchmove'].forEach(ev => document.addEventListener(ev, stopGesture, { passive: false }));
+['gesturestart', 'gesturechange', 'dblclick'].forEach(ev => document.addEventListener(ev, stopGesture, { passive: false }));
+// go full screen (and lock sideways) on the first tap where the browser allows it (Android, iPad)
+function goBig() {
+  if (standalone) return;
+  const el = document.documentElement, rq = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!rq || document.fullscreenElement || document.webkitFullscreenElement) return;
+  try {
+    const pr = rq.call(el, { navigationUI: 'hide' });
+    const lock = () => { try { const o = screen.orientation; if (o && o.lock) o.lock('landscape').catch(() => {}); } catch (e) {} };
+    if (pr && pr.then) pr.then(lock).catch(() => {}); else lock();
+  } catch (e) {}
+}
+// a back-swipe that slips through mid-game just pauses instead of leaving the page
+let backArmed = false;
+function armBack() { if (backArmed) return; backArmed = true; try { history.pushState({ game: 1 }, ''); } catch (e) {} }
+addEventListener('popstate', () => {
+  backArmed = false;
+  if (pauseForSwipe()) armBack();   // only hold you here if a game was running; a 2nd back leaves
+});
+// iPhone Safari can't go full screen from a web page, so point to Add to Home Screen once
+(() => {
+  const tip = document.getElementById('tip');
+  let seen = false; try { seen = localStorage.getItem('drmark_tip') === '1'; } catch (e) {}
+  if (!isIOS || standalone || seen) return;
+  tip.style.display = 'block';
+  const hide = () => { tip.style.display = 'none'; try { localStorage.setItem('drmark_tip', '1'); } catch (e) {} };
+  tip.addEventListener('pointerdown', e => { e.stopPropagation(); hide(); });
+  setTimeout(() => { tip.style.display = 'none'; }, 12000);
+})();
+
 const rand = (a, b) => a + Math.random() * (b - a);
 const irand = (a, b) => Math.floor(rand(a, b + 1));
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -428,9 +483,12 @@ const menuBtn = i => ({ x: 470, y: 252 + i * 56, w: 360, h: 44 });
 const pauseBtn = i => ({ x: W / 2 - 200, y: 230 + i * 66, w: 400, h: 50 });
 const holdBtn = () => ({ x: bd[0].x0 + GW * CELL + 40 + 92, y: 70, w: 88, h: 92 });
 const pauseIcon = { x: 0, y: 0, w: 60, h: 50 };
-cv.addEventListener('pointerdown', e => {
-  e.preventDefault(); initAudio();
-  if (e.pointerType === 'touch') isTouch = true; else if (e.pointerType === 'mouse') isTouch = false;
+function pauseForSwipe() { if (state === 'play' && !demo) { state = 'paused'; pauseSel = 0; return true; } return false; }
+// listen on the whole page, so a swipe that starts in the side bars still moves the capsule
+document.addEventListener('pointerdown', e => {
+  if (onOverlay(e)) return;
+  e.preventDefault(); initAudio(); armBack();
+  if (e.pointerType === 'touch') { isTouch = true; goBig(); } else if (e.pointerType === 'mouse') isTouch = false;
   const pt = toGame(e);
   if (state === 'title') {
     for (let i = 0; i < 4; i++) if (inR(pt, menuBtn(i))) {
@@ -455,7 +513,7 @@ cv.addEventListener('pointerdown', e => {
   if (nPlayers === 1 && inR(pt, holdBtn())) { touchIn.bP = true; return; }
   drag = { x0: pt.x, y0: pt.y, x: pt.x, y: pt.y, t0: performance.now(), stepsX: 0, moved: false, id: e.pointerId };
 });
-cv.addEventListener('pointermove', e => {
+addEventListener('pointermove', e => {
   if (!drag || e.pointerId !== drag.id) return;
   const pt = toGame(e); drag.x = pt.x; drag.y = pt.y;
   const cells = Math.trunc((pt.x - drag.x0) / (CELL * 1.1));
@@ -471,7 +529,7 @@ function endDrag(e) {
   else if (dy > 70 && dt < 260 && Math.abs(dx) < 50) touchIn.upP = true;                        // quick flick down = drop
   touchIn.soft = false; drag = null;
 }
-cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
+addEventListener('pointerup', endDrag); addEventListener('pointercancel', endDrag);
 cv.addEventListener('contextmenu', e => e.preventDefault());
 
 function pauseChoose(a) {

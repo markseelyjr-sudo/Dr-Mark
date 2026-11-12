@@ -11,3 +11,5 @@ Made for you by Mark ♥
 (2 players: second player uses the arrows, Enter to rotate and Right Shift to hold)
 
 **Game controllers:** d-pad/stick move · A rotate · B hold · down soft drop · up hard drop · START pause
+
+**Full screen on a phone:** Android goes full screen on your first tap. On iPhone, tap Share → *Add to Home Screen* and launch it from the icon — no browser bars, no accidental swipes.
